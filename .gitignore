@@ -1,0 +1,23 @@
+# Large output files
+outputs/*.traj
+outputs/*.log
+
+# SLURM logs (individual job files)
+job.out.*
+job.err.*
+logs/
+
+# Scratch copies
+ngoen_*/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Model cache
+*.model
+*.model.cache
+
+# Temporary files
+gpu_util
+*.swp
