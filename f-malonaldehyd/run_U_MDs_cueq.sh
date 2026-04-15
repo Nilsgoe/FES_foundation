@@ -52,7 +52,11 @@ trap cleanup EXIT
 mkdir -p "${scratch_dir}"
 cd "${scratch_dir}"
 mkdir -p outputs logs
-cp -r "${project_dir}"/* .
+# Exclude logs/ and outputs/ so the initial copy never snapshots the live
+# SLURM output files — cleanup would otherwise overwrite them with empty copies.
+shopt -s extglob
+cp -r "${project_dir}"/!(logs|outputs|ngoen_*) .
+shopt -u extglob
 
 source "${python_venv_dir}/bin/activate"
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
