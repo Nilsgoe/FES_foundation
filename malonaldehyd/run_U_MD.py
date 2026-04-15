@@ -10,7 +10,7 @@ from ase.io import read
 from ase.md.langevin import Langevin
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from ase.optimize import BFGS
-from mace.calculators import mace_off, mace_omol
+from mace.calculators import mace_mp, mace_off, mace_omol, mace_polar
 
 from biASE import General_Bias_Calculator
 
@@ -20,15 +20,17 @@ def parse_args():
     parser.add_argument('shift', type=int, help='Integer shift index.')
     parser.add_argument(
         '--model-family',
-        choices=['off', 'omol'],
+        choices=['off', 'omol', 'polar', 'mh1'],
         default='off',
-        help='Model family to use.',
+        help='Model family: off, omol, polar, or mh1.',
     )
     parser.add_argument(
         '--model-size',
-        choices=['small', 'medium', 'large', 'extra_large'],
-        required=True,
-        help='Model size to use. OMOL should use extra_large.',
+        default='large',
+        help=(
+            'Model size. off: small/medium/large; omol: extra_large; '
+            'polar: s/m/l; mh1: mh-1 (used as model identifier).'
+        ),
     )
     parser.add_argument(
         '--run-label',
@@ -49,15 +51,21 @@ def umbrella_potential(x, x0, k):
     return 0.5 * k * dx**2
 
 
-def build_calculator(model_family, model_size):
+def build_calculator(model_family: str, model_size: str):
     if model_family == 'off':
         if model_size == 'extra_large':
-            raise ValueError('MACE OFF does not support model-size extra_large in this workflow.')
-        return mace_off(model=model_size, dispersion=True)
+            raise ValueError('MACE-OFF does not support model-size extra_large.')
+        return mace_off(model=model_size, dispersion=True, enable_cueq=True)
     if model_family == 'omol':
         if model_size != 'extra_large':
-            raise ValueError('OMOL is expected to use model-size extra_large in this workflow.')
-        return mace_omol(model=model_size)
+            raise ValueError('OMOL is expected to use model-size extra_large.')
+        return mace_omol(model=model_size, enable_cueq=True)
+    if model_family == 'polar':
+        polar_key = f'polar-1-{model_size}'  # s/m/l → polar-1-s/m/l
+        return mace_polar(model=polar_key, enable_cueq=True)
+    if model_family == 'mh1':
+        # model_size is used as the model identifier (e.g. "mh-1")
+        return mace_mp(model=model_size, enable_cueq=True)
     raise ValueError(f'Unsupported model family: {model_family}')
 
 
