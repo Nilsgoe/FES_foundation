@@ -64,8 +64,8 @@ def build_calculator(model_family: str, model_size: str):
         polar_key = f'polar-1-{model_size}'  # s/m/l → polar-1-s/m/l
         return mace_polar(model=polar_key, enable_cueq=True)
     if model_family == 'mh1':
-        # model_size is used as the model identifier (e.g. "mh-1")
-        return mace_mp(model=model_size, enable_cueq=True)
+        # model_size is the model identifier (e.g. "mh-1"); omol head for organics
+        return mace_mp(model=model_size, head="omol", enable_cueq=True)
     raise ValueError(f'Unsupported model family: {model_family}')
 
 

@@ -14,7 +14,7 @@
 module purge
 
 project_dir=/nexus/posix0/FHI-Theory/ngoen/Enhanced_sampling/MACE/malonaldehyd
-python_venv_dir=/work/mace_alpha_cueq_venv
+python_venv_dir=/fhi/home/ngoen/software/biASE-venv
 
 # Ensure destination directories exist before SLURM tries to write logs there
 mkdir -p "${project_dir}/outputs" "${project_dir}/logs"
