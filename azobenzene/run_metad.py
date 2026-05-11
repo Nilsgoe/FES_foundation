@@ -57,6 +57,17 @@ def parse_args():
     parser.add_argument("--cv-mode", choices=sorted(METAD_SETTINGS), required=True)
     parser.add_argument("--run-label", default="", help="Optional label appended to the output tag.")
     parser.add_argument("--steps", type=int, default=int(1e6), help="Number of MD steps.")
+    parser.add_argument(
+        "--continue-run",
+        action="store_true",
+        help="Restart from the last frame of an existing trajectory and append to the same bias/trajectory files.",
+    )
+    parser.add_argument(
+        "--trajectory-loginterval",
+        type=int,
+        default=1,
+        help="Write every Nth MD step to the trajectory.",
+    )
     return parser.parse_args()
 
 
@@ -128,11 +139,11 @@ def build_calculator(model_key):
                 "for polar runs."
             ) from exc
 
-        return mace_polar(model=f"polar-1-{model_size}", enable_cueq=False)
+        return mace_polar(model=f"polar-1-{model_size}", enable_cueq=True)
     if model_family == "mh1":
         from mace.calculators import mace_mp
 
-        return mace_mp(model=model_size, head="omol", enable_cueq=False)
+        return mace_mp(model=model_size, head="omol", enable_cueq=True)
     raise ValueError(f"Unsupported model key: {model_key}")
 
 
@@ -148,28 +159,43 @@ def main():
     outputs_dir = Path("outputs")
     outputs_dir.mkdir(exist_ok=True)
 
-    atoms = read(system_spec["start_file"]).copy()
-    atoms.calc = build_calculator(args.model_key)
-    BFGS(atoms, logfile=str(outputs_dir / f"bfgs_{run_tag}.log")).run(fmax=0.05, steps=500)
+    trajectory_path = outputs_dir / f"metad_{run_tag}.traj"
+    bias_path = outputs_dir / f"metad_{run_tag}.txt"
 
-    MaxwellBoltzmannDistribution(atoms, temperature_K=333)
+    if args.continue_run:
+        if not trajectory_path.exists() or not bias_path.exists():
+            raise FileNotFoundError(
+                f"Continuation requested but missing {trajectory_path} and/or {bias_path}."
+            )
+        atoms = read(f"{trajectory_path}@-1").copy()
+    else:
+        atoms = read(system_spec["start_file"]).copy()
+
+    atoms.calc = build_calculator(args.model_key)
+    if not args.continue_run:
+        BFGS(atoms, logfile=str(outputs_dir / f"bfgs_{run_tag}.log")).run(fmax=0.05, steps=500)
+        MaxwellBoltzmannDistribution(atoms, temperature_K=333)
+
     dyn = WT_Metadynamics(
         atoms,
         timestep=0.5 * units.fs,
         temperature_K=333,
         friction=0.1,
-        trajectory=str(outputs_dir / f"metad_{run_tag}.traj"),
+        trajectory=str(trajectory_path),
         fixcm=False,
         cvs=build_cv_function(args.system, args.cv_mode),
         std_dev=metad_spec["std_dev"],
         bias_height=metad_spec["bias_height"],
         interval_size=metad_spec["interval_size"],
-        output_file=str(outputs_dir / f"metad_{run_tag}.txt"),
+        output_file=str(bias_path),
         well_temp=True,
         bias_factor=metad_spec["bias_factor"],
+        append_trajectory=args.continue_run,
+        input_file=str(bias_path) if args.continue_run else None,
         wrapping=metad_spec["wrapping"],
         bounds=metad_spec["bounds"],
         max_bias=int(1e6),
+        loginterval=args.trajectory_loginterval,
     )
     dyn.run(args.steps)
 

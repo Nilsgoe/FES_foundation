@@ -7,7 +7,7 @@ import argparse
 from pathlib import Path
 
 EXPECTED_PHI_LABELS = (("ALA", 2, "C"), ("ALA", 3, "N"), ("ALA", 3, "CA"), ("ALA", 3, "C"))
-EXPECTED_PSI_LABELS = (("ALA", 3, "N"), ("ALA", 3, "CA"), ("ALA", 3, "C"), ("ALA", 4, "N"))
+EXPECTED_PSI_LABELS = (("ALA", 3, "N"), ("ALA", 3, "CA"), ("ALA", 3, "C"), ("NME", 4, "N"))
 
 
 def parse_args() -> argparse.Namespace:

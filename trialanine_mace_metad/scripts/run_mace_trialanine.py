@@ -7,8 +7,10 @@ import argparse
 from pathlib import Path
 
 import jax.numpy as jnp
+import torch
 from ase import units
 from ase.io import read, write
+from ase.io.trajectory import Trajectory
 from ase.md.langevin import Langevin
 from ase.md.nptberendsen import NPTBerendsen
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution, Stationary, ZeroRotation
@@ -21,13 +23,13 @@ MODEL_SPECS = {
     "off": {"family": "off", "size": "large"},
     "omol": {"family": "omol", "size": "extra_large"},
     "mh1": {"family": "mh1", "size": "mh-1"},
-    "polar": {"family": "polar", "size": "l"},
+    "polar": {"family": "polar", "size": "m"},
 }
 
-# 0-based ASE atom indices for ACE-ALA-ALA-NME as built by Amber sequence.
-# Validate against structures/trialanine_gas_initial.pdb after Amber setup.
-DEFAULT_PHI = (14, 16, 18, 24)  # C(ALA1)-N(ALA2)-CA(ALA2)-C(ALA2)
-DEFAULT_PSI = (16, 18, 24, 26)  # N(ALA2)-CA(ALA2)-C(ALA2)-N(NME)
+# 0-based ASE atom indices for ACE-ALA-ALA-ALA-NME as built by Amber sequence.
+# These target the central alanine residue (ALA 3 in the Amber PDB numbering).
+DEFAULT_PHI = (14, 16, 18, 24)  # C(ALA2)-N(ALA3)-CA(ALA3)-C(ALA3)
+DEFAULT_PSI = (16, 18, 24, 26)  # N(ALA3)-CA(ALA3)-C(ALA3)-N(ALA4)
 
 
 def parse_indices(text: str) -> tuple[int, int, int, int]:
@@ -39,19 +41,24 @@ def parse_indices(text: str) -> tuple[int, int, int, int]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=["gas_metad", "solution_npt", "solution_metad"], required=True)
+    parser.add_argument(
+        "--mode",
+        choices=["gas_metad", "solution_npt", "solution_npt_continue", "solution_metad"],
+        required=True,
+    )
     parser.add_argument("--model-key", choices=sorted(MODEL_SPECS), required=True)
-    parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument("--input", required=True)
     parser.add_argument("--output-prefix", required=True, type=Path)
     parser.add_argument("--npt-output", type=Path, help="Required for solution_npt.")
     parser.add_argument("--nvt-output", type=Path, help="Optional fixed-cell NVT output for solution_npt.")
     parser.add_argument("--steps", type=int, default=1_000_000, help="MetaD or plain MD steps.")
-    parser.add_argument("--nvt-steps", type=int, default=100_000)
-    parser.add_argument("--npt-steps", type=int, default=100_000)
-    parser.add_argument("--temperature", type=float, default=300.0)
+    parser.add_argument("--nvt-steps", type=int, default=40_000)
+    parser.add_argument("--npt-steps", type=int, default=200_000)
+    parser.add_argument("--temperature", type=float, default=293.0)
     parser.add_argument("--pressure-bar", type=float, default=1.0)
     parser.add_argument("--timestep-fs", type=float, default=0.5)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--force-float32", action="store_true")
     parser.add_argument("--phi", type=parse_indices, default=DEFAULT_PHI)
     parser.add_argument("--psi", type=parse_indices, default=DEFAULT_PSI)
     parser.add_argument("--minimize", action="store_true", help="Run a short MACE minimization before dynamics.")
@@ -74,12 +81,28 @@ def build_calculator(model_key: str, device: str):
     if family == "mh1":
         from mace.calculators import mace_mp
 
-        return mace_mp(model=size, head="omol", enable_cueq=False, device=device)
+        return mace_mp(
+            model=size,
+            head="omol",
+            enable_cueq=True,
+            device=device,
+            default_dtype="float32",
+        )
     if family == "polar":
         from mace.calculators import mace_polar
 
-        return mace_polar(model=f"polar-1-{size}", enable_cueq=False, device=device)
+        return mace_polar(model=f"polar-1-{size}", enable_cueq=True, device=device)
     raise ValueError(f"Unsupported model key: {model_key}")
+
+
+def load_last_valid_traj_frame(path: str):
+    traj = Trajectory(path)
+    for idx in range(len(traj) - 1, -1, -1):
+        try:
+            return traj[idx].copy()
+        except Exception:
+            continue
+    raise ValueError(f"No readable frame found in trajectory {path}")
 
 
 def compute_dihedral(positions, indices: tuple[int, int, int, int]):
@@ -107,7 +130,11 @@ def build_cv_function(phi: tuple[int, int, int, int], psi: tuple[int, int, int, 
 
 
 def prepare_atoms(args: argparse.Namespace):
-    atoms = read(args.input).copy()
+    input_spec = str(args.input)
+    if args.mode == "solution_npt_continue" and input_spec.endswith(".traj"):
+        atoms = load_last_valid_traj_frame(input_spec)
+    else:
+        atoms = read(input_spec).copy()
     if args.mode == "gas_metad":
         atoms.set_pbc(False)
     else:
@@ -154,8 +181,32 @@ def run_solution_npt(atoms, args: argparse.Namespace) -> None:
         timestep=args.timestep_fs * units.fs,
         temperature_K=args.temperature,
         pressure_au=args.pressure_bar * units.bar,
-        taut=100.0 * units.fs,
-        taup=1000.0 * units.fs,
+        taut=1000.0 * units.fs,
+        taup=2000.0 * units.fs,
+        compressibility_au=4.57e-5 / units.bar,
+        logfile=str(args.output_prefix.with_suffix(".npt.log")),
+        trajectory=str(args.output_prefix.with_suffix(".npt.traj")),
+        loginterval=100,
+    )
+    dyn.run(args.npt_steps)
+
+    args.npt_output.parent.mkdir(parents=True, exist_ok=True)
+    write(args.npt_output, atoms, format="extxyz")
+    write(args.output_prefix.with_suffix(".npt_final.xyz"), atoms, format="extxyz")
+
+
+def run_solution_npt_continue(atoms, args: argparse.Namespace) -> None:
+    if args.npt_output is None:
+        raise ValueError("--npt-output is required for solution_npt_continue.")
+
+    initialize_velocities(atoms, args.temperature)
+    dyn = NPTBerendsen(
+        atoms,
+        timestep=args.timestep_fs * units.fs,
+        temperature_K=args.temperature,
+        pressure_au=args.pressure_bar * units.bar,
+        taut=1000.0 * units.fs,
+        taup=2000.0 * units.fs,
         compressibility_au=4.57e-5 / units.bar,
         logfile=str(args.output_prefix.with_suffix(".npt.log")),
         trajectory=str(args.output_prefix.with_suffix(".npt.traj")),
@@ -207,6 +258,8 @@ def run_metad(atoms, args: argparse.Namespace) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.force_float32:
+        torch.set_default_dtype(torch.float32)
     args.output_prefix.parent.mkdir(parents=True, exist_ok=True)
     atoms = prepare_atoms(args)
 
@@ -215,6 +268,8 @@ def main() -> None:
 
     if args.mode == "solution_npt":
         run_solution_npt(atoms, args)
+    elif args.mode == "solution_npt_continue":
+        run_solution_npt_continue(atoms, args)
     elif args.mode == "solution_metad":
         run_metad(atoms, args)
     elif args.mode == "gas_metad":

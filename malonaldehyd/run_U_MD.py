@@ -55,6 +55,12 @@ def build_calculator(model_family: str, model_size: str):
     if model_family == 'off':
         if model_size == 'extra_large':
             raise ValueError('MACE-OFF does not support model-size extra_large.')
+        if model_size == 'off24':
+            return mace_off(
+                checkpoint_path='MACE-OFF24_medium.model',
+                dispersion=True,
+                enable_cueq=True,
+            )
         return mace_off(model=model_size, dispersion=True, enable_cueq=True)
     if model_family == 'omol':
         if model_size != 'extra_large':
