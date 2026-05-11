@@ -26,6 +26,7 @@ def system_entries() -> list[Entry]:
         "off_large": ("MACE", "off_large"),
         "off_medium": ("MACE", "off_medium"),
         "off_small": ("MACE", "off_small"),
+        "off24_medium": ("MACE", "off24_medium"),
         "omol_extra_large": ("MACE", "omol_extra_large"),
         "mh1_mh-1": ("MACE", "mh1_mh-1"),
         "polar_l": ("MACE", "polar_l"),

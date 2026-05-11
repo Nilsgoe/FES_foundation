@@ -36,6 +36,7 @@ MODEL_LABELS = {
     "off_large": "MACE-OFF large",
     "off_medium": "MACE-OFF medium",
     "off_small": "MACE-OFF small",
+    "off24_medium": "MACE-OFF24 medium",
     "omol_extra_large": "MACE-OMOL XL",
     "mh1_mh-1": "MACE-MH1",
     "polar_l": "MACE-Polar L",
@@ -50,6 +51,7 @@ MODEL_COLORS = {
     "off_large": "#1b9e77",
     "off_medium": "#66a61e",
     "off_small": "#a6d854",
+    "off24_medium": "#2ca25f",
     "omol_extra_large": "#d95f02",
     "mh1_mh-1": "#7570b3",
     "polar_l": "#e7298a",
@@ -92,6 +94,68 @@ def parse_mean_csv(path: Path) -> tuple[str, UmbrellaWindow] | None:
         shift=shift,
         source=path,
     )
+
+
+def load_umbrella_windows(paths: list[Path]) -> list[UmbrellaWindow]:
+    windows: list[UmbrellaWindow] = []
+    for path in paths:
+        with path.open() as handle:
+            row = next(csv.reader(handle))
+        values = [float(x) for x in row]
+        if len(values) < 5:
+            continue
+        shift_match = re.search(r"_shift_(-?\d+)(?:_|\.csv$)", path.name)
+        shift = int(shift_match.group(1)) if shift_match else 0
+        windows.append(
+            UmbrellaWindow(
+                center=values[0],
+                mean_cv=values[1],
+                mean_force=values[2],
+                mean_energy=values[3],
+                initial_cv=values[4],
+                shift=shift,
+                source=path,
+            )
+        )
+    return sorted(windows, key=lambda w: w.mean_cv)
+
+
+def write_umbrella_outputs(model_tag: str, windows: list[UmbrellaWindow], output_dir: Path) -> list[str]:
+    if not windows:
+        return []
+
+    x = np.array([w.mean_cv for w in windows], dtype=float)
+    force = np.array([w.mean_force for w in windows], dtype=float)
+    free_energy = cumulative_trapezoid(x, force)
+    free_energy -= np.min(free_energy)
+
+    csv_path = output_dir / f"umbrella_integration_{model_tag}.csv"
+    with csv_path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["mean_cv", "free_energy", "mean_force", "window_center", "shift", "source_file"])
+        for window, xi, fi, dfi in zip(windows, x, free_energy, force):
+            writer.writerow([xi, fi, dfi, window.center, window.shift, window.source.name])
+
+    fig, ax1 = plt.subplots(figsize=(8.0, 5.0))
+    ax1.plot(x, free_energy, marker="o", color="#1f78b4", label="Umbrella integration FES")
+    ax1.set_xlabel("CV (A)")
+    ax1.set_ylabel("Relative free energy (arb. units)")
+    ax1.set_title(f"{output_dir.parent.name}/{output_dir.name}: {model_tag}")
+    ax1.grid(alpha=0.25)
+
+    ax2 = ax1.twinx()
+    ax2.plot(x, force, color="#d95f02", linestyle="--", linewidth=2.0, label="Mean force")
+    ax2.set_ylabel("Mean force")
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="best", frameon=False)
+    fig.tight_layout()
+
+    png_path = output_dir / f"umbrella_integration_{model_tag}.png"
+    fig.savefig(png_path, dpi=300)
+    plt.close(fig)
+    return [str(csv_path), str(png_path)]
 
 
 def cumulative_trapezoid(x: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -178,43 +242,16 @@ def analyze_umbrella_case(case_dir: Path, output_dir: Path) -> list[str]:
 
     generated: list[str] = []
     for model_tag, windows in sorted(grouped.items()):
-        windows = sorted(windows, key=lambda w: w.mean_cv)
-        x = np.array([w.mean_cv for w in windows], dtype=float)
-        force = np.array([w.mean_force for w in windows], dtype=float)
-        free_energy = cumulative_trapezoid(x, force)
-        free_energy -= np.min(free_energy)
-
-        csv_path = output_dir / f"umbrella_integration_{model_tag}.csv"
-        with csv_path.open("w", newline="") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(
-                ["mean_cv", "free_energy", "mean_force", "window_center", "shift", "source_file"]
-            )
-            for window, xi, fi, dfi in zip(windows, x, free_energy, force):
-                writer.writerow([xi, fi, dfi, window.center, window.shift, window.source.name])
-        generated.append(str(csv_path))
-
-        fig, ax1 = plt.subplots(figsize=(8.0, 5.0))
-        ax1.plot(x, free_energy, marker="o", color="#1f78b4", label="Umbrella integration FES")
-        ax1.set_xlabel("CV (A)")
-        ax1.set_ylabel("Relative free energy (arb. units)")
-        ax1.set_title(f"{case_dir.parent.name}/{case_dir.name}: {model_tag}")
-        ax1.grid(alpha=0.25)
-
-        ax2 = ax1.twinx()
-        ax2.plot(x, force, color="#d95f02", linestyle="--", linewidth=2.0, label="Mean force")
-        ax2.set_ylabel("Mean force")
-
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines1 + lines2, labels1 + labels2, loc="best", frameon=False)
-        fig.tight_layout()
-
-        png_path = output_dir / f"umbrella_integration_{model_tag}.png"
-        fig.savefig(png_path, dpi=300)
-        plt.close(fig)
-        generated.append(str(png_path))
+        generated.extend(write_umbrella_outputs(model_tag, sorted(windows, key=lambda w: w.mean_cv), output_dir))
     return generated
+
+
+def analyze_off24_case(case_dir: Path) -> list[str]:
+    output_dir = case_dir / "analysis"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = sorted((case_dir / "outputs").glob("mean_cv_energy_raccoon_off_off24_shift_*.csv"))
+    windows = load_umbrella_windows(paths)
+    return write_umbrella_outputs("off24_medium", windows, output_dir)
 
 
 def analyze_bias_file(bias_path: Path, output_dir: Path) -> list[str]:
@@ -425,6 +462,7 @@ def analyze_additional_systems() -> dict[str, object]:
         summary["systems"][model_kind] = model_summary
 
     for system_name in ("malonaldehyd", "f-malonaldehyd"):
+        summary["systems"].setdefault("raccoon_off24", {})[system_name] = analyze_off24_case(REPO_ROOT / system_name)
         summary["combined_plots"].extend(create_combined_malon_plot(REPO_ROOT / system_name))
 
     return summary
