@@ -25,7 +25,7 @@ class MetadRun:
     reg_factor: np.ndarray    # (n_hills,) = h_i / (Height0 * γ/(γ-1))
 
 
-_HEADER_KV = re.compile(r"(\w+)\s*=\s*([-\d.eE+TruFals]+)")
+_HEADER_KV = re.compile(r"(\w+)\s*=\s*(True|False|[-\d.eE+]+)")
 
 
 def parse_bias_log(path: str | Path) -> MetadRun:
@@ -49,14 +49,22 @@ def parse_bias_log(path: str | Path) -> MetadRun:
         )
 
     tag = _tag_from_filename(path)
+    try:
+        height0_eV   = float(kv["Height"])
+        pace_steps   = int(kv["Pace"])
+        step_size_fs = float(kv["Step_size"])
+        bias_factor  = float(kv["Bias_factor"])
+        wt           = (kv["WT"] == "True")
+    except KeyError as exc:
+        raise ValueError(f"{path}: missing header field {exc}") from exc
     return MetadRun(
         path=path,
         tag=tag,
-        height0_eV=float(kv["Height"]),
-        pace_steps=int(kv["Pace"]),
-        step_size_fs=float(kv["Step_size"]),
-        bias_factor=float(kv["Bias_factor"]),
-        wt=(kv["WT"] == "True"),
+        height0_eV=height0_eV,
+        pace_steps=pace_steps,
+        step_size_fs=step_size_fs,
+        bias_factor=bias_factor,
+        wt=wt,
         time_fs=data[:, 0],
         cv1_deg=data[:, 1],
         cv2_deg=data[:, 2],
