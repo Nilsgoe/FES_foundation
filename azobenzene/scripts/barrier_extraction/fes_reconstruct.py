@@ -48,3 +48,21 @@ def reconstruct_fes_2d(
     F = -V
     F -= F.min()
     return F
+
+
+def reconstruct_fes_1d(run, cv1_grid, n_hills: int | None = None, chunk: int = 1000) -> np.ndarray:
+    """Same as 2D, but only one CV. Stored heights are γ/(γ-1)-pre-scaled."""
+    if n_hills is None:
+        n_hills = run.height_eV.size
+    H = run.height_eV[:n_hills]
+    C1 = run.cv1_deg[:n_hills]
+    S1 = run.sigma1_deg[:n_hills]
+    V = np.zeros(cv1_grid.size, dtype=np.float64)
+    for k0 in range(0, n_hills, chunk):
+        k1 = min(k0 + chunk, n_hills)
+        d1 = wrap_deg(cv1_grid[:, None] - C1[None, k0:k1])
+        g1 = np.exp(-0.5 * (d1 / S1[None, k0:k1]) ** 2)
+        V += g1 @ H[k0:k1]
+    F = -V
+    F -= F.min()
+    return F
