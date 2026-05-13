@@ -9,7 +9,7 @@ def default_grid(d_cv1: float = 1.0, d_cv2: float = 1.0):
     return cv1, cv2
 
 
-def _wrap_deg(delta: np.ndarray) -> np.ndarray:
+def wrap_deg(delta: np.ndarray) -> np.ndarray:
     return (delta + 180.0) % 360.0 - 180.0
 
 
@@ -38,7 +38,7 @@ def reconstruct_fes_2d(
     for k0 in range(0, n_hills, chunk):
         k1 = min(k0 + chunk, n_hills)
         # (G1, G2) per-hill chunk -> rank-3 then sum over k
-        d1 = _wrap_deg(cv1_grid[:, None] - C1[None, k0:k1])         # (Ncv1, Nk)
+        d1 = wrap_deg(cv1_grid[:, None] - C1[None, k0:k1])          # (Ncv1, Nk)
         d2 = cv2_grid[:, None] - C2[None, k0:k1]                    # (Ncv2, Nk)
         g1 = np.exp(-0.5 * (d1 / S1[None, k0:k1]) ** 2)
         g2 = np.exp(-0.5 * (d2 / S2[None, k0:k1]) ** 2)

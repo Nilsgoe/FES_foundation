@@ -1,7 +1,7 @@
 import numpy as np
 from azobenzene.scripts.barrier_extraction.fes_io import MetadRun
 from azobenzene.scripts.barrier_extraction.fes_reconstruct import (
-    reconstruct_fes_2d, default_grid, _wrap_deg,
+    reconstruct_fes_2d, default_grid, wrap_deg,
 )
 from pathlib import Path
 
@@ -20,8 +20,8 @@ def _make_run(centers_cv1, centers_cv2, h=0.1*10/9):
 
 
 def test_wrap_deg():
-    assert _wrap_deg(np.array([200.0]))[0] == -160.0
-    assert _wrap_deg(np.array([-200.0]))[0] == 160.0
+    assert wrap_deg(np.array([200.0]))[0] == -160.0
+    assert wrap_deg(np.array([-200.0]))[0] == 160.0
 
 
 def test_periodicity_seam_handled():
@@ -57,3 +57,19 @@ def test_no_double_counting():
     d1 = F1[far] - F1[near]
     d2 = F2[far] - F2[near]
     assert np.isclose(d2, 2*d1, rtol=0.01)
+
+
+def test_chunk_boundary_consistency():
+    # Reconstruct with chunk=1, chunk=3, chunk=500 — must all agree to 1e-12
+    cv1, cv2 = default_grid(4.0, 4.0)  # small grid for speed
+    n_hills = 7  # crosses chunk=3 boundary (chunks of 3, 3, 1)
+    rng = np.random.default_rng(0)
+    run = _make_run(
+        rng.uniform(-180, 180, n_hills).tolist(),
+        rng.uniform(0, 180, n_hills).tolist(),
+    )
+    F_chunk_1   = reconstruct_fes_2d(run, cv1, cv2, chunk=1)
+    F_chunk_3   = reconstruct_fes_2d(run, cv1, cv2, chunk=3)
+    F_chunk_500 = reconstruct_fes_2d(run, cv1, cv2, chunk=500)
+    np.testing.assert_allclose(F_chunk_1, F_chunk_3,   atol=1e-12)
+    np.testing.assert_allclose(F_chunk_1, F_chunk_500, atol=1e-12)
