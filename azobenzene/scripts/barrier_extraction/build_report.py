@@ -103,6 +103,51 @@ def main() -> None:
         md.append(f"- ![Convergence (hills)](figures/{tag}/convergence_hills.png)")
         md.append(f"- ![Convergence (FES)](figures/{tag}/convergence_fes.png)")
         md.append(f"- ![MFEP profile](figures/{tag}/mfep_profile.png)\n")
+    # 1D-MetaD cross-check (Task 11): an independent estimator that biases
+    # only on CV1 (CNNC dihedral). Agreement with the 2D MFEP barriers within
+    # ~kT is evidence the orthogonal coordinate is not the rate-limiting
+    # bottleneck; large disagreement flags sampling problems in the 2D run.
+    one_d_csv = OUT / "summary_table_1d.csv"
+    if one_d_csv.exists():
+        df1d = pd.read_csv(one_d_csv)
+        df1d["seed"]  = df1d["tag"].str.split("_").str[0]
+        df1d["model"] = df1d["tag"].str.split("_").str[1]
+        df2d_min = df[["seed", "model",
+                       "rot_cis_to_trans_mean_kJmol", "dG_rxn_mean_kJmol"]].rename(
+            columns={"rot_cis_to_trans_mean_kJmol": "2D_MFEP_c2t_kJmol",
+                     "dG_rxn_mean_kJmol":           "2D_dG_rxn_kJmol"})
+        df1d_min = df1d[["seed", "model",
+                         "dG_c2t_kJmol", "dG_rxn_kJmol"]].rename(
+            columns={"dG_c2t_kJmol": "1D_c2t_kJmol",
+                     "dG_rxn_kJmol": "1D_dG_rxn_kJmol"})
+        cmp = df2d_min.merge(df1d_min, on=["seed", "model"], how="outer")
+        cmp["Δc2t_kJmol"]    = cmp["2D_MFEP_c2t_kJmol"] - cmp["1D_c2t_kJmol"]
+        cmp["Δdg_rxn_kJmol"] = cmp["2D_dG_rxn_kJmol"]  - cmp["1D_dG_rxn_kJmol"]
+        md.append("\n## 1D-MetaD cross-check (Task 11)\n")
+        md.append(
+            "Independent native 1D MetaD runs (bias only on CV1) processed by "
+            "`run_1d_analysis.py`. Disagreement > kT ≈ 2.6 kJ/mol flags 2D sampling "
+            "issues (e.g. orthogonal CV not visited from one seed).\n\n"
+            "Per-run native-1D figures: `figures/{tag}/fes_1d_native.png`. Raw "
+            "summary: `summary_table_1d.csv`.\n"
+        )
+        md.append(_df_to_markdown(cmp, floatfmt=".1f"))
+        md.append("")
+
+    # TS structures (Task 12): pointer to .xyz files extracted near each
+    # 2D MFEP saddle. Match score in deg² = squared distance in (cv1,cv2)
+    # from the predicted saddle; <100 = within ~10° of the saddle.
+    ts_root = OUT / "ts_structures"
+    if ts_root.exists() and any(ts_root.iterdir()):
+        md.append("\n## Transition-state structures (Task 12)\n")
+        md.append(
+            "Representative atomic geometries extracted from the MD trajectory at "
+            "the frame closest to each predicted 2D MFEP saddle, written as "
+            "`.xyz` files under `ts_structures/{tag}/ts_rotation.xyz` and "
+            "`ts_structures/{tag}/ts_inversion.xyz`. Match scores were logged at "
+            "extraction time (lower is better; < 100 deg² ≈ within 10° of the saddle).\n"
+        )
+
     md.append("\n## Literature comparison\n")
     md.append(
         "**Reference values** (verify each citation against your own bibliography "
