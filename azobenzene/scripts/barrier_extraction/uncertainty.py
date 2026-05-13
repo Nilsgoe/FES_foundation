@@ -34,7 +34,11 @@ def _pick_basin(F, cv1, cv2, target):
     mins = find_local_minima(F, footprint_deg=10.0, cv1_grid=cv1, cv2_grid=cv2)
     if not mins:
         return nearest_grid(cv1, cv2, *target)
-    best = min(mins, key=lambda m: (cv1[m[0]] - target[0])**2 + (cv2[m[1]] - target[1])**2)
+    def _dist2(m):
+        d1 = ((cv1[m[0]] - target[0] + 180.0) % 360.0) - 180.0   # periodic CV1
+        d2 = cv2[m[1]] - target[1]
+        return d1 * d1 + d2 * d2
+    best = min(mins, key=_dist2)
     return (best[0], best[1])
 
 
