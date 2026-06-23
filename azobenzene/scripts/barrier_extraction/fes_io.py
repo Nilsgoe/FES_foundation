@@ -130,6 +130,13 @@ def parse_bias_log_1d(path: str | Path) -> MetadRun:
 def _tag_from_filename(p: Path) -> str:
     # metad_azob_{cis|trans}_{model}_{1d|2d}_*.txt -> "{cis|trans}_{model}_{1|2}d"
     m = re.search(r"metad_azob_(cis|trans)_(\w+?)_(1d|2d)_", p.name)
-    if not m:
-        raise ValueError(f"unrecognized filename pattern: {p.name}")
-    return f"{m.group(1)}_{m.group(2)}_{m.group(3)}"
+    if m:
+        return f"{m.group(1)}_{m.group(2)}_{m.group(3)}"
+
+    # Viper model logs use e.g. pet_spice_azob_cis_2d.bias or
+    # sol3r_azob_trans_2d.bias.
+    m = re.search(r"(\w+?)_azob_(cis|trans)_(1d|2d)", p.name)
+    if m:
+        return f"{m.group(2)}_{m.group(1)}_{m.group(3)}"
+
+    raise ValueError(f"unrecognized filename pattern: {p.name}")

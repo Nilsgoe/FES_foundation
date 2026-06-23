@@ -174,7 +174,7 @@ def _predict(x_p,x_t,alpha,delta=1.0,l=1.0,alpha_RQ=0.5,sigma=0.3,noise_matrix=N
     L,lower = cho_factor(K_s,lower=True)
     V = solve_triangular(L,K_pred,lower=True)
     y_var = K_diag - np.einsum("ij,ji->i", V.T, V)
-    y_var = np.clip(y_var,a_min=0.0) 
+    y_var = np.clip(y_var, 0.0) 
     y = np.matmul(alpha,K_pred)
     #print(f"Predict K:{K.shape}")
 
@@ -223,7 +223,7 @@ def _predict_diff(x_p,x_t,alpha,delta=1.0,l=1.0,alpha_RQ=0.5,sigma=0.3,noise_mat
 
     V = solve_triangular(L,K_pred,lower=True)
     dy_var = K_diag - np.einsum("ij,ji->i", V.T, V)
-    dy_var = np.clip(dy_var,a_min=0.0) 
+    dy_var = np.clip(dy_var, 0.0) 
     #print(f"Predict diff K:{K.shape}")
     dy = np.matmul(alpha,K_pred)
     
@@ -297,5 +297,4 @@ if __name__=="__main__":
     print(RQ(1.1,1.0))
     print(dRQ(1.1,1.0))
  
-
 

@@ -71,11 +71,41 @@ def system_entries() -> list[Entry]:
         )
         entries.append(
             Entry(
-                model_key="sol3r",
+                model_key="upet_pet-spice-l_rot",
+                family="UPET",
+                source="viper",
+                system=system,
+                csv_path=ROOT
+                / "viper_analysis"
+                / "upet"
+                / f"{system}_pet_spice_rotavg3_43w"
+                / "umbrella_integration_viper_upet_pet_spice_rot.csv",
+            )
+        )
+        entries.append(
+            Entry(
+                model_key="SO3LR",
                 family="SO3LR",
                 source="viper",
                 system=system,
                 csv_path=ROOT / "viper_analysis" / "sol3r" / system / "umbrella_integration_viper_sol3r.csv",
+            )
+        )
+    for system, duration, tag in (
+        ("malonaldehyd", "malonaldehyd_8ps", "orca_dft_8ps"),
+        ("f-malonaldehyd", "f-malonaldehyd_4p5ps_mlip_cv", "orca_dft_4p5ps_mlip_cv"),
+    ):
+        entries.append(
+            Entry(
+                model_key="wB97M-V_def2-TZVPD",
+                family="DFT",
+                source="viper_orca",
+                system=system,
+                csv_path=ROOT
+                / "analysis"
+                / "orca_dft"
+                / duration
+                / f"umbrella_integration_{tag}.csv",
             )
         )
     return entries
@@ -84,7 +114,15 @@ def system_entries() -> list[Entry]:
 def central_barriers(csv_path: Path) -> dict[str, float]:
     data = np.genfromtxt(csv_path, delimiter=",", names=True)
     x = np.atleast_1d(data["mean_cv"]).astype(float)
-    y = np.atleast_1d(data["free_energy"]).astype(float)
+    names = data.dtype.names or ()
+    if "free_energy_diff_gp" in names:
+        y = np.atleast_1d(data["free_energy_diff_gp"]).astype(float)
+    elif "free_energy" in names:
+        y = np.atleast_1d(data["free_energy"]).astype(float)
+    elif "free_energy_ui" in names:
+        y = np.atleast_1d(data["free_energy_ui"]).astype(float)
+    else:
+        raise ValueError(f"No supported free-energy column found in {csv_path}")
 
     central_mask = np.abs(x) <= 0.2
     if np.any(central_mask):

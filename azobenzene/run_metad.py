@@ -139,7 +139,7 @@ def build_calculator(model_key):
                 "for polar runs."
             ) from exc
 
-        return mace_polar(model=f"polar-1-{model_size}", enable_cueq=True)
+        return mace_polar(model=f"polar-1-{model_size}", enable_cueq=False)
     if model_family == "mh1":
         from mace.calculators import mace_mp
 
@@ -170,6 +170,10 @@ def main():
         atoms = read(f"{trajectory_path}@-1").copy()
     else:
         atoms = read(system_spec["start_file"]).copy()
+
+    if args.model_key == "polar" and not any(atoms.pbc) and atoms.cell.volume == 0:
+        atoms.set_cell([50, 50, 50])
+        atoms.center()
 
     atoms.calc = build_calculator(args.model_key)
     if not args.continue_run:

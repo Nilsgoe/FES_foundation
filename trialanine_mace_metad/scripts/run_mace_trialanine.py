@@ -21,6 +21,10 @@ from Metadynamics import WT_Metadynamics
 
 MODEL_SPECS = {
     "off": {"family": "off", "size": "large"},
+    "off24": {
+        "family": "off24",
+        "checkpoint": "/nexus/posix0/FHI-Theory/ngoen/Enhanced_sampling/MACE/malonaldehyd/MACE-OFF24_medium.model",
+    },
     "omol": {"family": "omol", "size": "extra_large"},
     "mh1": {"family": "mh1", "size": "mh-1"},
     "polar": {"family": "polar", "size": "m"},
@@ -57,23 +61,47 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=293.0)
     parser.add_argument("--pressure-bar", type=float, default=1.0)
     parser.add_argument("--timestep-fs", type=float, default=0.5)
+    parser.add_argument("--bias-height-ev", type=float, default=0.1)
+    parser.add_argument("--sigma-deg", type=float, default=5.0)
+    parser.add_argument("--deposition-interval", type=int, default=100)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--force-float32", action="store_true")
     parser.add_argument("--phi", type=parse_indices, default=DEFAULT_PHI)
     parser.add_argument("--psi", type=parse_indices, default=DEFAULT_PSI)
     parser.add_argument("--minimize", action="store_true", help="Run a short MACE minimization before dynamics.")
+    parser.add_argument(
+        "--continue-run",
+        action="store_true",
+        help="Continue MetaD from output-prefix.metad.traj and output-prefix.metad.txt.",
+    )
+    parser.add_argument(
+        "--trajectory-loginterval",
+        type=int,
+        default=1,
+        help="Write every Nth MD step to the MetaD trajectory.",
+    )
     return parser.parse_args()
 
 
 def build_calculator(model_key: str, device: str):
     spec = MODEL_SPECS[model_key]
     family = spec["family"]
-    size = spec["size"]
+    size = spec.get("size")
 
     if family == "off":
         from mace.calculators import mace_off
 
         return mace_off(model=size, dispersion=True, enable_cueq=True, device=device)
+    if family == "off24":
+        from mace.calculators import mace_off
+
+        return mace_off(
+            checkpoint_path=spec["checkpoint"],
+            dispersion=True,
+            enable_cueq=True,
+            device=device,
+            default_dtype="float32",
+        )
     if family == "omol":
         from mace.calculators import mace_omol
 
@@ -131,7 +159,12 @@ def build_cv_function(phi: tuple[int, int, int, int], psi: tuple[int, int, int, 
 
 def prepare_atoms(args: argparse.Namespace):
     input_spec = str(args.input)
-    if args.mode == "solution_npt_continue" and input_spec.endswith(".traj"):
+    if args.continue_run:
+        traj_path = args.output_prefix.with_suffix(".metad.traj")
+        if not traj_path.exists():
+            raise FileNotFoundError(f"Continuation requested but missing trajectory: {traj_path}")
+        atoms = load_last_valid_traj_frame(str(traj_path))
+    elif args.mode == "solution_npt_continue" and input_spec.endswith(".traj"):
         atoms = load_last_valid_traj_frame(input_spec)
     else:
         atoms = read(input_spec).copy()
@@ -234,24 +267,32 @@ def run_gas_thermalization(atoms, args: argparse.Namespace) -> None:
 
 
 def run_metad(atoms, args: argparse.Namespace) -> None:
-    initialize_velocities(atoms, args.temperature)
+    bias_path = args.output_prefix.with_suffix(".metad.txt")
+    traj_path = args.output_prefix.with_suffix(".metad.traj")
+    if args.continue_run and not bias_path.exists():
+        raise FileNotFoundError(f"Continuation requested but missing bias file: {bias_path}")
+    if not args.continue_run:
+        initialize_velocities(atoms, args.temperature)
     dyn = WT_Metadynamics(
         atoms,
         timestep=args.timestep_fs * units.fs,
         temperature_K=args.temperature,
         friction=0.1,
-        trajectory=str(args.output_prefix.with_suffix(".metad.traj")),
+        trajectory=str(traj_path),
         fixcm=False,
         cvs=build_cv_function(args.phi, args.psi),
-        std_dev=[5.0, 5.0],
-        bias_height=0.1,
-        interval_size=100,
-        output_file=str(args.output_prefix.with_suffix(".metad.txt")),
+        std_dev=[args.sigma_deg, args.sigma_deg],
+        bias_height=args.bias_height_ev,
+        interval_size=args.deposition_interval,
+        output_file=str(bias_path),
         well_temp=True,
         bias_factor=10,
+        append_trajectory=args.continue_run,
+        input_file=str(bias_path) if args.continue_run else None,
         wrapping=[True, True],
         bounds=((-180.0, 180.0), (-180.0, 180.0)),
         max_bias=int(1e6),
+        loginterval=args.trajectory_loginterval,
     )
     dyn.run(args.steps)
 

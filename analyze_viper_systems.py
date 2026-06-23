@@ -403,18 +403,35 @@ def create_combined_malon_plot(system_dir: Path) -> list[str]:
     generated: list[str] = []
     for csv_path in csv_paths:
         model_tag = csv_path.stem.replace("umbrella_integration_", "")
-        data = np.genfromtxt(csv_path, delimiter=",", names=True)
+        gpr_path = csv_path.with_name(f"umbrella_gpr_{model_tag}_pmf.csv")
+        data_path = gpr_path if gpr_path.exists() else csv_path
+        data = np.genfromtxt(data_path, delimiter=",", names=True)
         if data.size == 0:
             continue
-        x = np.atleast_1d(data["mean_cv"])
-        y = np.atleast_1d(data["free_energy"])
+        names = data.dtype.names or ()
+        if "pmf" in names:
+            x = np.atleast_1d(data["cv"])
+            y = np.atleast_1d(data["pmf"])
+        elif "pmf_mean" in names:
+            x = np.atleast_1d(data["cv"])
+            y = np.atleast_1d(data["pmf_mean"])
+        elif "free_energy_diff_gp" in names:
+            x = np.atleast_1d(data["mean_cv"])
+            y = np.atleast_1d(data["free_energy_diff_gp"])
+        elif "cv" in names and "free_energy" in names:
+            x = np.atleast_1d(data["cv"])
+            y = np.atleast_1d(data["free_energy"])
+        else:
+            x = np.atleast_1d(data["mean_cv"])
+            y = np.atleast_1d(data["free_energy"])
+        y = y - np.min(y)
         color = MODEL_COLORS.get(model_tag, None)
         label = MODEL_LABELS.get(model_tag, model_tag.replace("_", " "))
         ax.plot(x, y, label=label, color=color)
 
     ax.set_xlabel("CV (A)")
-    ax.set_ylabel("Relative free energy (arb. units)")
-    ax.set_title(f"{system_dir.name}: umbrella integration comparison")
+    ax.set_ylabel("Relative free energy (eV)")
+    ax.set_title(f"{system_dir.name}: diff-GP umbrella comparison")
     ax.grid(alpha=0.22)
     ax.legend(loc="best", frameon=False, ncol=1)
     fig.tight_layout()

@@ -126,7 +126,6 @@ def make_plot(system: str, records: list[FESRecord]) -> list[Path]:
     ax.set_xlim(-180, 180)
     ax.set_xlabel("CNNC dihedral (deg)")
     ax.set_ylabel("Relative free energy (arb. units)")
-    ax.set_title(f"Azobenzene {system} 1D MetaD comparison")
     ax.grid(alpha=0.22)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.18), ncol=3, frameon=False)
     fig.tight_layout()
